@@ -60,8 +60,8 @@ function normalize(s = '') {
 
       // ✅ 关键词过滤
       const KEYS = ['美联储','加息','CPI','非农','通胀','利率','美元','日元','黄金','油','制裁','停火','战争','特朗普','鲍威尔'];
-      const textAll = `${title} ${text}`;
-      if (!KEYS.some(k => textAll.includes(k))) continue;
+      if (!KEYS.some(k => title.includes(k))) continue;
+
 
       // 构造消息体
       const msg = `### ${title}
