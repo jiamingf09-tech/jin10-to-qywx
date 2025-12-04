@@ -13,10 +13,10 @@ const parser = new Parser({ timeout: 15000 });
 let history = {};
 if (fs.existsSync(STORE)) history = JSON.parse(fs.readFileSync(STORE,'utf8'));
 
-// 全局已发送集合（终极防重）
+// 全局防重集合
 let sentSet = new Set(history.__ALL__ || []);
 
-// 标签
+// 分类标签
 function tagOf(url){
   if (url.includes('/important')) return '金十·重要快讯';
   const map = { '1':'贵金属','2':'黄金','3':'白银','12':'外汇','13':'欧元','14':'英镑','15':'日元','16':'美元','17':'瑞郎','18':'人民币',
@@ -32,9 +32,14 @@ function tagOf(url){
   return m && map[m[1]] ? `金十·${map[m[1]]}` : '金十';
 }
 
-// 归一化（用于标题/正文去重）
+// 归一化（用于正文/标题去重）
 function normalize(t='') {
   return t.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g,'').toLowerCase();
+}
+
+// ✅ 唯一指纹：无 link 时用 guid / title / 时间兜底
+function fingerprint(it) {
+  return it.link || it.guid || normalize((it.title||'') + (it.pubDate||''));
 }
 
 (async () => {
@@ -47,50 +52,50 @@ function normalize(t='') {
       feed = await parser.parseURL(rss);
     } catch (e) {
       console.error('❌ RSS失败，已跳过：', rss, e.message);
-      continue; // 单源容错
+      continue;
     }
 
-    // 反转，保证旧→新
+    // 保证旧→新
     const items = (feed.items || []).reverse();
 
-    // 断点续推
     const last = history[rss] || '';
     let newest = last;
 
     for (const it of items) {
-      if (!it.link) continue;
+      const id = fingerprint(it);
 
-      // ✅ 终极防重（任何曾发过的 link 直接跳过）
-      if (sentSet.has(it.link)) continue;
+      // ✅ 全局防重
+      if (sentSet.has(id)) continue;
 
-      // ✅ 断点续推（容忍乱序：遇到 last 只是不更新 newest，不影响 sentSet 防重）
-      if (it.link === last) continue;
+      // ✅ 断点续推
+      if (id === last) continue;
 
       const title = (it.title || '').trim();
       let text = (it.contentSnippet || '').trim();
       const time = it.pubDate || '';
       const tag = tagOf(rss);
 
-      // 标题/正文重复 → 清掉正文
+      // 标题和正文重复 → 清正文
       if (normalize(text).startsWith(normalize(title))) text = '';
 
-      // ✅ 仅对【重要快讯】做关键词过滤
+      // ✅ 仅 important 做关键词过滤
       if (tag === '金十·重要快讯') {
         const KEYS = ['美联储','加息','CPI','非农','通胀','利率','美元','日元','黄金','油','制裁','停火','战争','特朗普','鲍威尔'];
         const textAll = `${title} ${text}`;
         if (!KEYS.some(k => textAll.includes(k))) continue;
       }
 
+      // ✅ 支持无 link
+      const linkPart = it.link ? `\n[查看原文](${it.link})` : '';
+
       const msg = `### ${title}
 【${tag}】
-${text ? text + '\n' : ''}
-[查看原文](${it.link})${time ? `\n🕒 ${time}` : ''}`;
+${text ? text + '\n' : ''}${linkPart}${time ? `\n🕒 ${time}` : ''}`;
 
       try {
-        await axios.post(WEBHOOK, { msgtype:'markdown', markdown:{content: msg}});
-        // 记录防重
-        sentSet.add(it.link);
-        newest = it.link;
+        await axios.post(WEBHOOK, { msgtype:'markdown', markdown:{ content: msg } });
+        sentSet.add(id);
+        newest = id;
         total++;
       } catch (e) {
         console.error('❌ 推送失败：', e.message);
@@ -102,9 +107,9 @@ ${text ? text + '\n' : ''}
     if (newest) history[rss] = newest;
   }
 
-  // 只保留最近 1000 条指纹，防止文件无限增大
+  // 控制历史体积
   history.__ALL__ = Array.from(sentSet).slice(-1000);
 
-  fs.writeFileSync(STORE, JSON.stringify(history,null,2));
+  fs.writeFileSync(STORE, JSON.stringify(history, null, 2));
   console.log(`完成，成功发送 ${total} 条`);
 })();
