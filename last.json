@@ -1,5 +1,5 @@
 {
-  "https://rsshub.rssforever.com/jin10/important": "https://xnews.jin10.com/details/202213",
+  "https://rsshub.rssforever.com/jin10/important": "jin10:index:20251204230608194800",
   "__ALL__": [
     "https://xnews.jin10.com/details/202077",
     "https://xnews.jin10.com/details/202079",
@@ -210,7 +210,16 @@
     "jin10:category:20251204224424405800",
     "https://xnews.jin10.com/details/202213",
     "jin10:category:20251204225000001800",
-    "jin10:category:20251204225402463800"
+    "jin10:category:20251204225402463800",
+    "jin10:index:20251204230608194800",
+    "jin10:category:20251204230000001800",
+    "jin10:category:20251204230002685800",
+    "jin10:category:20251204230004697800",
+    "jin10:category:20251204230046473800",
+    "jin10:category:20251204230738770800",
+    "jin10:category:20251204231001090800",
+    "jin10:category:20251204231007592800",
+    "jin10:category:20251204231214172800"
   ],
-  "https://rsshub.rssforever.com/jin10/category/2": "jin10:category:20251204225402463800"
+  "https://rsshub.rssforever.com/jin10/category/2": "jin10:category:20251204231214172800"
 }
