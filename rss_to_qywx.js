@@ -45,6 +45,11 @@ function tagOf(url){
       const time = it.pubDate || '';
       const text = (it.contentSnippet || '').substring(0, 200);
       const tag = tagOf(rss);
+      
+      // 只留“高价值词”
+      const KEYS = ['美联储','加息','CPI','非农','通胀','利率','美元','日元','黄金','油','制裁','停火','战争','特朗普','鲍威尔'];
+      const textAll = `${it.title || ''} ${it.contentSnippet || ''}`;
+      if (!KEYS.some(k => textAll.includes(k))) continue;
 
       const msg = `### ${title}\n【${tag}】\n${text}\n\n[查看原文](${it.link})${time ? `\n🕒 ${time}` : ''}`;
       await axios.post(WEBHOOK, { msgtype:'markdown', markdown:{ content: msg } });
