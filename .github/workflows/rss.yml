@@ -14,51 +14,35 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ------------------------------------------------------------
-      # 1. 永远从 main checkout（main 一定存在，避免首次运行失败）
-      # ------------------------------------------------------------
-      - name: Checkout main
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: main
           fetch-depth: 0
 
-      # ------------------------------------------------------------
-      # 2. Node.js 环境
-      # ------------------------------------------------------------
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: '18'
 
-      # ------------------------------------------------------------
-      # 3. 安装依赖
-      # ------------------------------------------------------------
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
-      # ------------------------------------------------------------
-      # 4. 运行 RSS → 企业微信 推送脚本
-      # ------------------------------------------------------------
-      - name: Run bot
+      # 🔑 关键：准备 bot 分支并绑定 upstream
+      - name: Prepare bot branch
+        run: |
+          git fetch origin
+          git checkout bot/update-last || git checkout -b bot/update-last
+          git push --set-upstream origin bot/update-last || true
+
+      - name: Run RSS script
         env:
           RSS_URL: ${{ secrets.RSS_URL }}
           QYWX_WEBHOOK: ${{ secrets.QYWX_WEBHOOK }}
         run: node rss_to_qywx.js
 
-      # ------------------------------------------------------------
-      # 5. 提交运行态状态文件
-      #
-      # 关键点：
-      # - 使用 new_branch（EndBug v9 正确参数）
-      # - 不触碰 main（避免仓库规则 GH013）
-      # - 首次运行会自动创建 bot/update-last
-      # ------------------------------------------------------------
       - name: Commit last.json
         uses: EndBug/add-and-commit@v9
         with:
-          new_branch: bot/update-last
           message: "chore: update last.json"
           add: "last.json"
           push: "--force"
