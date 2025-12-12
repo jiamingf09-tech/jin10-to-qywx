@@ -9,38 +9,54 @@ const STORE = 'last.json';
 const RSS_LIST = RSS_ENV.split('\n').map(i => i.trim()).filter(Boolean);
 const parser = new Parser({ timeout: 15000 });
 
-// 读历史
+/* -------------------- 读取历史（兼容旧版本） -------------------- */
 let history = {};
-if (fs.existsSync(STORE)) history = JSON.parse(fs.readFileSync(STORE,'utf8'));
+if (fs.existsSync(STORE)) {
+  history = JSON.parse(fs.readFileSync(STORE, 'utf8'));
+}
 
-// 全局防重集合
-let sentSet = new Set(history.__ALL__ || []);
+const sentIdSet = new Set(history.__IDS__ || history.__ALL__ || []);
+const sentTripleSet = new Set(history.__TRIPLES__ || []);
 
-// 分类标签
+/* -------------------- 分类标签 -------------------- */
 function tagOf(url){
   if (url.includes('/important')) return '金十·重要快讯';
-  const map = { '1':'贵金属','2':'黄金','3':'白银','12':'外汇','13':'欧元','14':'英镑','15':'日元','16':'美元','17':'瑞郎','18':'人民币',
-                '24':'地缘','44':'缅甸','45':'印巴','46':'中东','155':'阿富汗','167':'俄乌',
-                '25':'人物','47':'鲍威尔','49':'拉加德','50':'特朗普','51':'拜登','157':'巴菲特',
-                '26':'央行','53':'美联储','54':'中行','55':'欧央行','56':'日央行','137':'货币政策',
-                '141':'英央','159':'澳联','160':'新西兰','161':'加央','112':'高盛','72':'美银','71':'三大评级',
-                '34':'政策','33':'债券','75':'中国','76':'美国','77':'欧盟','78':'日本','79':'关税',
-                '81':'香港','120':'英国','35':'经济数据','38':'灾害','96':'地震','97':'爆炸',
-                '98':'海啸','99':'寒潮','100':'洪涝','101':'火灾','102':'矿难','103':'枪击'
-              };
+  const map = {
+    '1':'贵金属','2':'黄金','3':'白银','12':'外汇','13':'欧元','14':'英镑','15':'日元','16':'美元',
+    '24':'地缘','46':'中东','167':'俄乌',
+    '25':'人物','47':'鲍威尔','50':'特朗普',
+    '26':'央行','53':'美联储',
+    '35':'经济数据'
+  };
   const m = url.match(/category\/(\d+)/);
   return m && map[m[1]] ? `金十·${map[m[1]]}` : '金十';
 }
 
-// 归一化（用于正文/标题去重）
+/* -------------------- 归一化 -------------------- */
 function normalize(t='') {
   return t.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g,'').toLowerCase();
 }
 
-// ✅ 唯一指纹：无 link 时用 guid / title / 时间兜底
-function fingerprint(it) {
+/* -------------------- 指纹 -------------------- */
+function idFingerprint(it) {
   return it.link || it.guid || normalize((it.title||'') + (it.pubDate||''));
 }
+
+function tripleFingerprint(title, text, time) {
+  return normalize(`${title}|${text}|${time}`);
+}
+
+/* -------------------- 关键词 -------------------- */
+const WHITE_KEYS = [
+  '美联储','加息','CPI','非农','通胀','利率','美元','日元',
+  '黄金','原油','油价','制裁','停火','战争','特朗普','鲍威尔','今日重点'
+];
+
+const BLACK_KEYS = [
+  '广告','推广','赞助','抽奖','福利','期货盯盘神器专属文章','沪金主力合约','VIP·85折',
+  '沪银主力合约','金十研究员','直播','上海黄金交易所黄金T+D','上海黄金交易所白银T+D','现货黄金',
+  '纽约期金日内','股价','开盘','日内涨','日内跌','期货盯盘神器'
+];
 
 (async () => {
   let total = 0;
@@ -51,41 +67,48 @@ function fingerprint(it) {
       console.log('Fetching:', rss);
       feed = await parser.parseURL(rss);
     } catch (e) {
-      console.error('❌ RSS失败，已跳过：', rss, e.message);
+      console.error('❌ RSS失败：', rss, e.message);
       continue;
     }
 
-    // 保证旧→新
     const items = (feed.items || []).reverse();
-
-    const last = history[rss] || '';
-    let newest = last;
+    const lastId = history[rss] || null;
+    let newestId = lastId;
 
     for (const it of items) {
-      const id = fingerprint(it);
+      const id = idFingerprint(it);
+      if (!id) continue;
 
-      // ✅ 全局防重
-      if (sentSet.has(id)) continue;
+      // ✅ id 去重（跨 RSS）
+      if (sentIdSet.has(id)) continue;
+      if (id === lastId) continue;
 
-      // ✅ 断点续推
-      if (id === last) continue;
-
-      const title = (it.title || '').trim();
+      let title = (it.title || '').trim();
       let text = (it.contentSnippet || '').trim();
       const time = it.pubDate || '';
-      const tag = tagOf(rss);
 
-      // 标题和正文重复 → 清正文
-      if (normalize(text).startsWith(normalize(title))) text = '';
+      // 标题/正文完全为空
+      if (!title && !text) continue;
 
-      // ✅ 仅 important 做关键词过滤
-      if (tag === '金十·黄金') {
-        const KEYS = ['美联储','加息','CPI','非农','通胀','利率','美元','日元','黄金','油','制裁','停火','战争','特朗普','鲍威尔','今日重点'];
-        const textAll = `${title} ${text}`;
-        if (!KEYS.some(k => textAll.includes(k))) continue;
+      // 标题重复正文 → 清正文
+      if (normalize(text).startsWith(normalize(title))) {
+        text = '';
       }
 
-      // ✅ 支持无 link
+      // 三元组去重
+      const triple = tripleFingerprint(title, text, time);
+      if (sentTripleSet.has(triple)) continue;
+
+      const textAll = `${title} ${text}`;
+
+      const hitWhite = WHITE_KEYS.some(k => textAll.includes(k));
+      const hitBlack = BLACK_KEYS.some(k => textAll.includes(k));
+
+      // 白名单优先
+      if (!hitWhite && hitBlack) continue;
+      if (!hitWhite && !hitBlack) continue;
+
+      const tag = tagOf(rss);
       const linkPart = it.link ? `\n[查看原文](${it.link})` : '';
 
       const msg = `### ${title}
@@ -93,9 +116,13 @@ function fingerprint(it) {
 ${text ? text + '\n' : ''}${linkPart}${time ? `\n🕒 ${time}` : ''}`;
 
       try {
-        await axios.post(WEBHOOK, { msgtype:'markdown', markdown:{ content: msg } });
-        sentSet.add(id);
-        newest = id;
+        await axios.post(WEBHOOK, {
+          msgtype: 'markdown',
+          markdown: { content: msg }
+        });
+        sentIdSet.add(id);
+        sentTripleSet.add(triple);
+        newestId = id;
         total++;
       } catch (e) {
         console.error('❌ 推送失败：', e.message);
@@ -104,11 +131,12 @@ ${text ? text + '\n' : ''}${linkPart}${time ? `\n🕒 ${time}` : ''}`;
       await new Promise(r => setTimeout(r, 1000));
     }
 
-    if (newest) history[rss] = newest;
+    if (newestId) history[rss] = newestId;
   }
 
-  // 控制历史体积
-  history.__ALL__ = Array.from(sentSet).slice(-1000);
+  /* -------------------- 写回（限制体积） -------------------- */
+  history.__IDS__ = Array.from(sentIdSet).slice(-10000);
+  history.__TRIPLES__ = Array.from(sentTripleSet).slice(-10000);
 
   fs.writeFileSync(STORE, JSON.stringify(history, null, 2));
   console.log(`完成，成功发送 ${total} 条`);
