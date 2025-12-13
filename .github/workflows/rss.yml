@@ -35,8 +35,9 @@ jobs:
           if git ls-remote --exit-code --heads origin bot/update-last >/dev/null 2>&1; then
             echo "Bot branch exists, checking out..."
             git checkout bot/update-last
-            # 从 main 同步最新代码（保留 last.json）
-            git checkout origin/main -- rss_to_qywx.js package.json package-lock.json README.md .github/workflows/ 2>/dev/null || true
+            # 只同步代码文件，不同步 workflow（避免冲突）
+            # Only sync code files, not workflows (to avoid conflicts)
+            git checkout origin/main -- rss_to_qywx.js package.json package-lock.json README.md 2>/dev/null || true
           else
             echo "Bot branch does not exist, creating from main..."
             git checkout -b bot/update-last
