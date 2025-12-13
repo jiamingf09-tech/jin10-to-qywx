@@ -14,30 +14,33 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      # 先检出 main 分支
+      # First checkout main branch
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
-          ref: bot/update-last
+          ref: main
           fetch-depth: 0
 
-      # 确保 bot 分支存在并包含最新代码
-      # Ensure bot branch exists and has latest code
-      - name: Prepare bot branch
+      - name: Setup Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # 如果 bot 分支不存在，从 main 创建
-          # If bot branch doesn't exist, create from main
-          if ! git rev-parse --verify origin/bot/update-last >/dev/null 2>&1; then
-            git checkout -b bot/update-last origin/main
-            git push -u origin bot/update-last
+
+      # 准备 bot 分支（如果存在则切换，不存在则从 main 创建）
+      # Prepare bot branch (switch if exists, create from main if not)
+      - name: Prepare bot branch
+        run: |
+          git fetch origin
+          if git ls-remote --exit-code --heads origin bot/update-last >/dev/null 2>&1; then
+            echo "Bot branch exists, checking out..."
+            git checkout bot/update-last
+            # 从 main 同步最新代码（保留 last.json）
+            git checkout origin/main -- rss_to_qywx.js package.json package-lock.json README.md .github/workflows/ 2>/dev/null || true
+          else
+            echo "Bot branch does not exist, creating from main..."
+            git checkout -b bot/update-last
           fi
-          
-          # 从 main 合并最新代码（仅代码文件，保留 last.json）
-          # Merge latest code from main (keep last.json)
-          git fetch origin main
-          git checkout origin/main -- rss_to_qywx.js package.json package-lock.json README.md .github/workflows/rss.yml 2>/dev/null || true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -55,8 +58,6 @@ jobs:
 
       - name: Commit and push last.json
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add last.json
           git diff --staged --quiet || git commit -m "chore: update last.json [skip ci]"
-          git push origin bot/update-last
+          git push origin bot/update-last --force-with-lease || git push -u origin bot/update-last
