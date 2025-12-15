@@ -11,10 +11,12 @@ A lightweight script that fetches Jin10 RSS feeds and pushes new items to a WeCo
 ## Features / 功能特性
 
 * **Multi-feed support**: Read multiple RSS URLs from one env var. / **多源支持**：环境变量一行一个 URL。
-* **MD5 hash deduplication**: Composite hash based on ID + title + content + time. / **MD5 哈希去重**：基于 ID + 标题 + 内容 + 时间的综合哈希。
+* **Smart Deduplication**: STRICT hash (ID+Time) + LOOSE hash (Title+Content) to prevent cross-feed duplicates. / **智能去重**：严格哈希（ID+时间）+ 宽松哈希（标题+内容），防止通过不同源推送重复新闻。
+* **Timezone Fixed**: Messages displayed in Beijing Time (UTC+8). / **时区修正**：消息时间强制显示为北京时间 (UTC+8)。
 * **Empty message filtering**: Dual-layer filter to block blank cards. / **空消息过滤**：双重过滤拦截空白卡片。
 * **Privacy protection**: RSS URLs are stored as MD5 hashes, not plaintext. / **隐私保护**：RSS 链接以 MD5 哈希存储，不暴露原始地址。
 * **Auto-cleanup**: 40,000 record limit with automatic cleanup notification. / **自动清理**：40,000 条记录上限，超限自动清理并通知。
+* **Dry Run**: Support `--dry-run` to test without sending. / **模拟运行**：支持 `--dry-run` 模式进行测试（不发送消息）。
 * **Resume support**: Per-feed last item tracking. / **断点续推**：每个 RSS 源独立记录最后推送位置。
 * **Markdown messages**: Push to WeCom bot with category tags. / **Markdown 消息**：推送到企业微信，带分类标签。
 
@@ -42,7 +44,11 @@ export QYWX_WEBHOOK="YOUR_KEY"
 3. **Run / 运行**
 
 ```bash
+# Normal run / 正常运行
 node rss_to_qywx.js
+
+# Dry run (simulate only) / 模拟运行（仅打印不发送）
+node rss_to_qywx.js --dry-run
 ```
 
 ## Deploy with GitHub Actions / 使用 GitHub Actions 部署
@@ -92,18 +98,25 @@ Go to **Settings → Secrets and variables → Actions**, add:
 
 **For collaborators / 协作者推送方式：**
 
-```bash
-# Push code changes to main branch only
-# 只推送代码更改到 main 分支
-git push origin main
+**Using Pull Requests (Recommended) / 使用 Pull Request（推荐）：**
+Do not push directly to `main` branch. Please create a new branch and submit a Pull Request.
+请勿直接推送到 `main` 分支。请创建新分支并提交 Pull Request。
 
-# The bot branch will be auto-created by Actions
-# bot 分支会由 Actions 自动创建
+```bash
+# Create feature branch / 创建特性分支
+git checkout -b feature/my-feature
+
+# Commit changes / 提交更改
+git commit -m "feat: add new feature"
+
+# Push to fork/remote / 推送到远程
+git push origin feature/my-feature
+
+# Then open a PR on GitHub / 然后在 GitHub 上创建 PR
 ```
 
-> **Note**: Only push **code changes** to `main`. Never manually push `last.json` to `main`. The bot branch is managed automatically by GitHub Actions.
-
-> **注意**：只推送**代码更改**到 `main`。不要手动推送 `last.json` 到 `main`。bot 分支由 GitHub Actions 自动管理。
+> **Note**: Only change **code files**. Never manually modify `last.json` in your PRs.
+> **注意**：只修改**代码文件**。不要在 PR 中手动修改 `last.json`。
 
 #### 4) Wait for schedule / 等待定时触发
 
@@ -122,24 +135,26 @@ Actions 会自动运行并管理两个分支。
 
 ### State File / 状态文件
 
-`last.json` uses version 2 format:
+`last.json` uses version 3 format (upgraded from v2):
 
-`last.json` 使用 v2 格式：
+`last.json` 使用 v3 格式（从 v2 升级）：
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "feeds": {
     "<md5(rss_url)>": "<md5(last_item_id)>"
   },
-  "hashes": ["<composite_hash>", ...],
+  "hashes": ["<composite_hash>"],
+  "contentHashes": ["<content_hash>"],
   "count": 1000,
   "updatedAt": "2025-12-13T03:00:00Z"
 }
 ```
 
 * `feeds`: Per-feed last item hash (RSS URL as MD5 key). / 每个源的最后条目哈希（RSS URL 用 MD5 作为键）。
-* `hashes`: Global deduplication hashes (max 40,000). / 全局去重哈希（最多 40,000 条）。
+* `hashes`: Global strict deduplication hashes (ID+Time). / 全局严格去重哈希（ID+时间）。
+* `contentHashes`: Global loose deduplication hashes (Title+Content). / 全局宽松去重哈希（标题+内容）。
 * `count`: Current hash count. / 当前哈希数量。
 * `updatedAt`: Last update timestamp. / 最后更新时间戳。
 
@@ -147,8 +162,10 @@ Actions 会自动运行并管理两个分支。
 
 1. **Fetch RSS**: Read feeds, reverse items to send old → new. / **获取 RSS**：拉取后反转条目，按旧到新发送。
 2. **Generate fingerprint**: Priority: `link` → `guid` → normalized `title + pubDate`. / **生成指纹**：优先级：`link` → `guid` → 归一化 `title + pubDate`。
-3. **Composite hash**: Create MD5 from `id|title|content|time`. / **综合哈希**：用 `id|title|content|time` 生成 MD5。
-4. **Deduplication**: Skip if composite hash already exists. / **去重**：若综合哈希已存在则跳过。
+3. **Composite hash**:
+    - **Strict**: `id|title|content|time` (Strict dedupe / 严格去重).
+    - **Loose**: `title|content` (Cross-source dedupe / 跨源去重).
+4. **Deduplication**: Skip if either hash exists. / **去重**：任一哈希存在即跳过。
 5. **Empty filter**: Block messages with empty title AND content. / **空消息过滤**：拦截标题和内容都为空的消息。
 6. **Keyword filter**: Must hit whitelist, must not hit blacklist. / **关键词过滤**：必须命中白名单，不能命中黑名单。
 7. **Push**: Send as WeCom markdown with category tag. / **推送**：以企业微信 Markdown 发送，带分类标签。
